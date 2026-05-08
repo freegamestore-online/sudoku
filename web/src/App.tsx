@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Shell } from "./components/Shell";
-import { Leaderboard } from "./components/Leaderboard";
+import { GameShell, GameTopbar } from "@freeappstore/games";
 import { useLeaderboard } from "./hooks/useLeaderboard";
 import { generatePuzzle, checkSolution, isBoardComplete } from "./lib/sudoku";
 import type { Board, Difficulty, Notes } from "./types";
@@ -31,7 +30,7 @@ export default function App() {
   const [scoreSubmitted, setScoreSubmitted] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const { topScores, recentScores, submitScore, loading } = useLeaderboard("sudoku");
+  const { submitScore } = useLeaderboard("sudoku");
 
   const startNewGame = useCallback((diff: Difficulty) => {
     const { puzzle, solution: sol } = generatePuzzle(diff);
@@ -223,247 +222,165 @@ export default function App() {
     };
   }
 
-  const sidebarContent = (
-    <nav className="flex-1 flex flex-col gap-4 px-4 overflow-y-auto">
-      {/* Difficulty */}
-      <div className="flex flex-col gap-1.5">
-        <span className="text-xs font-semibold" style={{ color: "var(--muted)" }}>
-          Difficulty
-        </span>
-        <div className="flex gap-1">
-          {(["easy", "medium", "hard"] as const).map((d) => (
-            <button
-              key={d}
-              onClick={() => startNewGame(d)}
-              className="px-3 py-1.5 text-xs font-semibold capitalize"
+  return (
+    <GameShell
+      topbar={
+        <GameTopbar
+          title="Sudoku"
+          stats={[
+            { label: "Time", value: formatTime(timer) },
+            { label: "Errors", value: errors, accent: errors > 0 },
+          ]}
+          actions={
+            <>
+              <button onClick={() => setNotesMode((n) => !n)}>
+                Notes {notesMode ? "ON" : "OFF"}
+              </button>
+              <button onClick={() => startNewGame(difficulty)}>New Game</button>
+            </>
+          }
+        />
+      }
+    >
+      <div className="relative w-full h-full" style={{ overflowY: "auto" }}>
+        <div className="flex flex-col items-center justify-center h-full gap-4 p-4">
+          {/* Win overlay */}
+          {gameWon && (
+            <div
+              className="flex flex-col items-center gap-3 p-6 text-center"
               style={{
-                borderRadius: "0.75rem",
-                background: difficulty === d ? "var(--accent)" : "var(--line)",
-                color: difficulty === d ? "#fff" : "var(--ink)",
+                borderRadius: "1.25rem",
+                background: "var(--panel)",
+                border: "1px solid var(--line)",
               }}
             >
-              {d}
-            </button>
-          ))}
-        </div>
-      </div>
+              <h2
+                className="text-2xl font-bold"
+                style={{ fontFamily: "Fraunces, serif", color: "var(--success)" }}
+              >
+                Congratulations!
+              </h2>
+              <p className="text-sm" style={{ color: "var(--muted)" }}>
+                Solved in {formatTime(timer)} with {errors} error{errors !== 1 ? "s" : ""}
+              </p>
+              <div className="flex gap-2 mt-2">
+                {(["easy", "medium", "hard"] as const).map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => startNewGame(d)}
+                    className="px-4 py-2 text-sm font-semibold capitalize"
+                    style={{
+                      borderRadius: "0.75rem",
+                      background: "var(--accent)",
+                      color: "#fff",
+                    }}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
-      {/* New Game */}
-      <button
-        onClick={() => startNewGame(difficulty)}
-        className="w-full py-2 text-sm font-semibold"
-        style={{
-          borderRadius: "0.75rem",
-          background: "var(--accent)",
-          color: "#fff",
-        }}
-      >
-        New Game
-      </button>
+          {/* Difficulty selector */}
+          <div className="flex gap-1">
+            {(["easy", "medium", "hard"] as const).map((d) => (
+              <button
+                key={d}
+                onClick={() => startNewGame(d)}
+                className="px-3 py-1.5 text-xs font-semibold capitalize"
+                style={{
+                  borderRadius: "0.75rem",
+                  background: difficulty === d ? "var(--accent)" : "var(--line)",
+                  color: difficulty === d ? "#fff" : "var(--ink)",
+                }}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
 
-      {/* Timer & Errors */}
-      <div className="flex items-center justify-between text-sm">
-        <div className="flex items-center gap-2">
-          <span style={{ color: "var(--muted)" }}>Time</span>
-          <span className="font-bold" style={{ fontFamily: "Fraunces, serif" }}>
-            {formatTime(timer)}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span style={{ color: "var(--muted)" }}>Errors</span>
-          <span className="font-bold" style={{ color: errors > 0 ? "var(--error)" : "var(--ink)", fontFamily: "Fraunces, serif" }}>
-            {errors}
-          </span>
-        </div>
-      </div>
-
-      {/* Notes toggle */}
-      <button
-        onClick={() => setNotesMode((n) => !n)}
-        className="w-full py-2 text-sm font-semibold"
-        style={{
-          borderRadius: "0.75rem",
-          background: notesMode ? "var(--accent)" : "var(--line)",
-          color: notesMode ? "#fff" : "var(--ink)",
-        }}
-      >
-        Notes {notesMode ? "ON" : "OFF"}
-      </button>
-
-      {/* Leaderboard */}
-      <div className="flex flex-col gap-1">
-        <span className="text-xs font-semibold" style={{ color: "var(--muted)" }}>
-          Leaderboard (fastest times)
-        </span>
-        <Leaderboard topScores={topScores} recentScores={recentScores} loading={loading} />
-      </div>
-    </nav>
-  );
-
-  const dockContent = (
-    <>
-      <span className="text-xs font-semibold" style={{ fontFamily: "Fraunces, serif" }}>
-        {formatTime(timer)}
-      </span>
-      <span
-        className="text-xs font-semibold"
-        style={{ color: errors > 0 ? "var(--error)" : "var(--muted)" }}
-      >
-        {errors} err
-      </span>
-      <button
-        onClick={() => setNotesMode((n) => !n)}
-        className="px-2 py-1 text-xs font-semibold"
-        style={{
-          borderRadius: "0.75rem",
-          background: notesMode ? "var(--accent)" : "var(--line)",
-          color: notesMode ? "#fff" : "var(--ink)",
-        }}
-      >
-        Notes
-      </button>
-    </>
-  );
-
-  return (
-    <Shell sidebar={sidebarContent} dock={dockContent}>
-      <div className="flex flex-col items-center justify-center h-full gap-4 p-4">
-        {/* Win overlay */}
-        {gameWon && (
-          <div
-            className="flex flex-col items-center gap-3 p-6 text-center"
-            style={{
-              borderRadius: "1.25rem",
-              background: "var(--panel)",
-              border: "1px solid var(--line)",
-            }}
-          >
-            <h2
-              className="text-2xl font-bold"
-              style={{ fontFamily: "Fraunces, serif", color: "var(--success)" }}
+          {/* Sudoku Grid */}
+          {board.length > 0 && (
+            <div
+              className="w-full"
+              style={{
+                maxWidth: "min(90vw, 90vh - 12rem, 32rem)",
+                aspectRatio: "1",
+              }}
             >
-              Congratulations!
-            </h2>
-            <p className="text-sm" style={{ color: "var(--muted)" }}>
-              Solved in {formatTime(timer)} with {errors} error{errors !== 1 ? "s" : ""}
-            </p>
-            <div className="flex gap-2 mt-2">
-              {(["easy", "medium", "hard"] as const).map((d) => (
+              <div
+                className="grid w-full h-full"
+                style={{
+                  gridTemplateColumns: "repeat(9, 1fr)",
+                  gridTemplateRows: "repeat(9, 1fr)",
+                  border: "2px solid var(--line-strong)",
+                  borderRadius: "0.5rem",
+                  overflow: "hidden",
+                }}
+              >
+                {board.map((row, r) =>
+                  row.map((cell, c) => (
+                    <button
+                      key={`${r}-${c}`}
+                      onClick={() => handleCellClick(r, c)}
+                      className="flex items-center justify-center relative select-none"
+                      style={getCellStyle(r, c)}
+                    >
+                      {cell !== null ? (
+                        cell
+                      ) : notes[r]![c]!.size > 0 ? (
+                        <NotesGrid notes={notes[r]![c]!} />
+                      ) : null}
+                    </button>
+                  )),
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Number Pad */}
+          {!gameWon && (
+            <div className="flex flex-wrap justify-center gap-2 w-full" style={{ maxWidth: "24rem" }}>
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
                 <button
-                  key={d}
-                  onClick={() => startNewGame(d)}
-                  className="px-4 py-2 text-sm font-semibold capitalize"
+                  key={num}
+                  onClick={() => handleNumberInput(num)}
+                  className="flex items-center justify-center font-bold text-lg"
                   style={{
+                    width: "3rem",
+                    height: "3rem",
                     borderRadius: "0.75rem",
-                    background: "var(--accent)",
-                    color: "#fff",
+                    background:
+                      selectedValue === num
+                        ? "var(--accent)"
+                        : "var(--panel)",
+                    color: selectedValue === num ? "#fff" : "var(--ink)",
+                    border: "1px solid var(--line)",
                   }}
                 >
-                  {d}
+                  {num}
                 </button>
               ))}
-            </div>
-          </div>
-        )}
-
-        {/* Sudoku Grid */}
-        {board.length > 0 && (
-          <div
-            className="w-full"
-            style={{
-              maxWidth: "min(90vw, 90vh - 12rem, 32rem)",
-              aspectRatio: "1",
-            }}
-          >
-            <div
-              className="grid w-full h-full"
-              style={{
-                gridTemplateColumns: "repeat(9, 1fr)",
-                gridTemplateRows: "repeat(9, 1fr)",
-                border: "2px solid var(--line-strong)",
-                borderRadius: "0.5rem",
-                overflow: "hidden",
-              }}
-            >
-              {board.map((row, r) =>
-                row.map((cell, c) => (
-                  <button
-                    key={`${r}-${c}`}
-                    onClick={() => handleCellClick(r, c)}
-                    className="flex items-center justify-center relative select-none"
-                    style={getCellStyle(r, c)}
-                  >
-                    {cell !== null ? (
-                      cell
-                    ) : notes[r]![c]!.size > 0 ? (
-                      <NotesGrid notes={notes[r]![c]!} />
-                    ) : null}
-                  </button>
-                )),
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Number Pad */}
-        {!gameWon && (
-          <div className="flex flex-wrap justify-center gap-2 w-full" style={{ maxWidth: "24rem" }}>
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
               <button
-                key={num}
-                onClick={() => handleNumberInput(num)}
-                className="flex items-center justify-center font-bold text-lg"
+                onClick={handleErase}
+                className="flex items-center justify-center font-semibold text-sm"
                 style={{
                   width: "3rem",
                   height: "3rem",
                   borderRadius: "0.75rem",
-                  background:
-                    selectedValue === num
-                      ? "var(--accent)"
-                      : "var(--panel)",
-                  color: selectedValue === num ? "#fff" : "var(--ink)",
+                  background: "var(--panel)",
+                  color: "var(--muted)",
                   border: "1px solid var(--line)",
                 }}
               >
-                {num}
+                Erase
               </button>
-            ))}
-            <button
-              onClick={handleErase}
-              className="flex items-center justify-center font-semibold text-sm"
-              style={{
-                width: "3rem",
-                height: "3rem",
-                borderRadius: "0.75rem",
-                background: "var(--panel)",
-                color: "var(--muted)",
-                border: "1px solid var(--line)",
-              }}
-            >
-              Erase
-            </button>
-          </div>
-        )}
-
-        {/* Mobile controls: difficulty + new game */}
-        <div className="flex gap-2 md:hidden">
-          {(["easy", "medium", "hard"] as const).map((d) => (
-            <button
-              key={d}
-              onClick={() => startNewGame(d)}
-              className="px-3 py-1.5 text-xs font-semibold capitalize"
-              style={{
-                borderRadius: "0.75rem",
-                background: difficulty === d ? "var(--accent)" : "var(--line)",
-                color: difficulty === d ? "#fff" : "var(--ink)",
-              }}
-            >
-              {d}
-            </button>
-          ))}
+            </div>
+          )}
         </div>
       </div>
-    </Shell>
+    </GameShell>
   );
 }
 
