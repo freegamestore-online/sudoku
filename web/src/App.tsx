@@ -236,7 +236,6 @@ export default function App() {
               <button className="min-h-[2.75rem] min-w-[2.75rem]" onClick={() => setNotesMode((n) => !n)}>
                 Notes {notesMode ? "ON" : "OFF"}
               </button>
-              <button className="min-h-[2.75rem] min-w-[2.75rem]" onClick={() => startNewGame(difficulty)}>New Game</button>
               <GameAuth />
             </>
           }
