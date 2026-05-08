@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { GameShell, GameTopbar } from "@freegamestore/games";
+import { GameShell, GameTopbar, GameAuth } from "@freegamestore/games";
 import { useLeaderboard } from "./hooks/useLeaderboard";
 import { generatePuzzle, checkSolution, isBoardComplete } from "./lib/sudoku";
 import type { Board, Difficulty, Notes } from "./types";
@@ -237,6 +237,7 @@ export default function App() {
                 Notes {notesMode ? "ON" : "OFF"}
               </button>
               <button onClick={() => startNewGame(difficulty)}>New Game</button>
+              <GameAuth />
             </>
           }
         />
