@@ -233,10 +233,10 @@ export default function App() {
           ]}
           actions={
             <>
-              <button onClick={() => setNotesMode((n) => !n)}>
+              <button className="min-h-[2.75rem] min-w-[2.75rem]" onClick={() => setNotesMode((n) => !n)}>
                 Notes {notesMode ? "ON" : "OFF"}
               </button>
-              <button onClick={() => startNewGame(difficulty)}>New Game</button>
+              <button className="min-h-[2.75rem] min-w-[2.75rem]" onClick={() => startNewGame(difficulty)}>New Game</button>
               <GameAuth />
             </>
           }
@@ -280,7 +280,7 @@ export default function App() {
                   <button
                     key={d}
                     onClick={() => startNewGame(d)}
-                    className="px-4 py-2 text-sm font-semibold capitalize"
+                    className="px-4 py-2 text-sm font-semibold capitalize min-h-[2.75rem]"
                     style={{
                       borderRadius: "0.75rem",
                       background: "var(--accent)",
@@ -300,7 +300,7 @@ export default function App() {
               <button
                 key={d}
                 onClick={() => startNewGame(d)}
-                className="px-3 py-1.5 text-xs font-semibold capitalize"
+                className="px-3 py-1.5 text-xs font-semibold capitalize min-h-[2.75rem]"
                 style={{
                   borderRadius: "0.75rem",
                   background: difficulty === d ? "var(--accent)" : "var(--line)",
