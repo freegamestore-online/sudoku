@@ -240,6 +240,17 @@ export default function App() {
               <GameAuth />
             </>
           }
+          rules={
+            <div>
+              <h3 style={{ fontWeight: 700 }}>Sudoku</h3>
+              <h4 style={{ fontWeight: 600 }}>Rules</h4>
+              <ul><li>Fill the 9x9 grid so every row, column, and 3x3 box contains 1-9 with no repeats</li></ul>
+              <h4 style={{ fontWeight: 600 }}>Controls</h4>
+              <ul><li>Tap a cell, then tap a number to place it</li><li>Use Notes mode for pencil marks</li><li>Arrow keys to navigate, Backspace to erase</li></ul>
+              <h4 style={{ fontWeight: 600 }}>Difficulty</h4>
+              <ul><li>Three levels: Easy, Medium, Hard</li></ul>
+            </div>
+          }
         />
       }
     >
