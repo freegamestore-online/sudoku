@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { GameShell, GameTopbar, GameAuth } from "@freegamestore/games";
+import { GameShell, GameTopbar, GameAuth, useGameSounds } from "@freegamestore/games";
 import { useLeaderboard } from '@freegamestore/games';
+
+type SoundsApi = ReturnType<typeof useGameSounds>;
+
+function AudioBridge({ apiRef }: { apiRef: React.MutableRefObject<SoundsApi | null> }) {
+  const sounds = useGameSounds();
+  apiRef.current = sounds;
+  return null;
+}
+
 import { generatePuzzle, checkSolution, isBoardComplete } from "./lib/sudoku";
 import type { Board, Difficulty, Notes } from "./types";
 
@@ -31,6 +40,7 @@ export default function App() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { submitScore } = useLeaderboard("sudoku");
+  const audioRef = useRef<SoundsApi | null>(null);
 
   const startNewGame = useCallback((diff: Difficulty) => {
     const { puzzle, solution: sol } = generatePuzzle(diff);
@@ -69,6 +79,7 @@ export default function App() {
     if (board.length === 0 || gameWon) return;
     if (isBoardComplete(board) && checkSolution(board, solution)) {
       setGameWon(true);
+      audioRef.current?.playLevelUp();
     }
   }, [board, solution, gameWon]);
 
@@ -76,8 +87,7 @@ export default function App() {
   useEffect(() => {
     if (gameWon && !scoreSubmitted) {
       setScoreSubmitted(true);
-      const name = localStorage.getItem("sudoku-player-name") ?? "Anonymous";
-      submitScore(timer, name);
+      submitScore(timer);
     }
   }, [gameWon, scoreSubmitted, timer, submitScore]);
 
@@ -117,6 +127,9 @@ export default function App() {
         // Check if wrong
         if (solution[row]?.[col] !== num) {
           setErrors((e) => e + 1);
+          audioRef.current?.playError();
+        } else {
+          audioRef.current?.playTick();
         }
       }
     },
@@ -253,6 +266,7 @@ export default function App() {
         />
       }
     >
+      <AudioBridge apiRef={audioRef} />
       <div className="relative w-full h-full" style={{ overflowY: "auto" }}>
         <div className="flex flex-col items-center justify-center h-full gap-4 p-4">
           {/* Win overlay */}
