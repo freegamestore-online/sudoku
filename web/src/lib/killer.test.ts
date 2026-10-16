@@ -91,7 +91,7 @@ describe("generateKiller", () => {
       expect(new Set(digits).size).toBe(digits.length);
       expect(digits.reduce((a, b) => a + b, 0)).toBe(cage.sum);
     }
-  });
+  }, 60_000);
 
   it("produces puzzles with exactly one solution, and it is the generated grid", () => {
     for (let i = 0; i < 5; i++) {

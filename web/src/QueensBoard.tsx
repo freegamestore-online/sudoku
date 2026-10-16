@@ -51,7 +51,8 @@ export function QueensBoard({ puzzle, placed, conflicts, onToggle }: QueensBoard
                 boxShadow: isConflict ? "inset 0 0 0 3px var(--error)" : undefined,
                 borderRight: c < n - 1 ? edge(colors[r]![c + 1]) : undefined,
                 borderBottom: r < n - 1 ? edge(colors[r + 1]?.[c]) : undefined,
-                color: isConflict ? "var(--error)" : "#1a1a1a",
+                // Fixed ink on the pastel regions: red text would clash with a red region in both themes.
+                color: isConflict ? "#7f1d1d" : "#1a1a1a",
                 fontSize: "clamp(1rem, 4vmin, 2rem)",
                 cursor: "pointer",
               }}

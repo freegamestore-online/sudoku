@@ -458,8 +458,13 @@ export default function App() {
           actions={
             <>
               {!isQueensMode(mode) && (
-                <button className="min-h-[2.75rem] min-w-[2.75rem]" onClick={() => setNotesMode((n) => !n)}>
-                  Notes {notesMode ? "ON" : "OFF"}
+                <button
+                  className="min-h-[2.75rem] min-w-[2.75rem] px-2 whitespace-nowrap"
+                  aria-pressed={notesMode}
+                  onClick={() => setNotesMode((n) => !n)}
+                  style={{ borderRadius: "0.75rem", background: notesMode ? "var(--accent)" : undefined, color: notesMode ? "#fff" : undefined }}
+                >
+                  Notes
                 </button>
               )}
               <GameAuth />
@@ -486,7 +491,7 @@ export default function App() {
       <AudioBridge apiRef={audioRef} />
       <div className="relative w-full h-full" style={{ overflowY: "auto" }}>
         {solveBurst && <Celebration id={solveBurst} label="Solved!" onDone={endSolveBurst} />}
-        <div className="flex flex-col items-center justify-center h-full gap-4 p-4">
+        <div className="flex flex-col items-center justify-center min-h-full gap-4 p-4">
           {/* Win overlay */}
           {gameWon && (
             <div
