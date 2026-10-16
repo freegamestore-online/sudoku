@@ -1,4 +1,4 @@
-import { generateSolution } from "./sudoku";
+import { generateSolution, shuffle } from "./sudoku";
 
 /** A group of cells whose digits must be distinct and add up to `sum`. */
 export interface Cage {
@@ -217,8 +217,8 @@ export function solveKiller(cages: Cage[], limit = 2): number[][][] {
  * solver still finds one solution. Each merge needs distinct digits in the
  * combined cage and at most `maxCageSize` cells.
  */
-export function generateKiller(maxCageSize = MAX_CAGE_SIZE): KillerPuzzle {
-  const solution = generateSolution();
+export function generateKiller(maxCageSize = MAX_CAGE_SIZE, random: () => number = Math.random): KillerPuzzle {
+  const solution = generateSolution(random);
   const cageOf: number[][] = Array.from({ length: 9 }, (_, r) =>
     Array.from({ length: 9 }, (_, c) => r * 9 + c),
   );
@@ -236,7 +236,7 @@ export function generateKiller(maxCageSize = MAX_CAGE_SIZE): KillerPuzzle {
   let merged = true;
   while (merged) {
     merged = false;
-    for (const [a, b] of shuffle(adjacentCagePairs(cageOf))) {
+    for (const [a, b] of shuffle(adjacentCagePairs(cageOf), random)) {
       const cellsA = members.get(a);
       const cellsB = members.get(b);
       if (!cellsA || !cellsB) continue; // one of them was merged away earlier in this pass
@@ -288,11 +288,48 @@ function adjacentCagePairs(cageOf: number[][]): [number, number][] {
   return pairs;
 }
 
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j]!, a[i]!];
+/** Index of the cage each cell belongs to, as `cageIndex[row][col]`. */
+export function cageIndexMap(cages: Cage[]): number[][] {
+  const index: number[][] = Array.from({ length: 9 }, () => Array<number>(9).fill(-1));
+  cages.forEach((cage, i) => {
+    for (const [r, c] of cage.cells) index[r]![c] = i;
+  });
+  return index;
+}
+
+/** The cell that shows a cage's sum label: its first cell in reading order. */
+export function cageLabelCell(cage: Cage): [number, number] {
+  return cage.cells.reduce((best, cell) =>
+    cell[0] < best[0] || (cell[0] === best[0] && cell[1] < best[1]) ? cell : best,
+  );
+}
+
+export interface CageStatus {
+  remaining: number;
+  empty: number;
+  candidates: number[][];
+}
+
+/**
+ * What the player still needs from a cage: the sum left after the filled cells, how many
+ * cells are empty, and the digit sets that could fill the empty cells without repeating
+ * a digit already placed in the cage.
+ */
+export function cageStatus(cage: Cage, board: (number | null)[][]): CageStatus {
+  let filled = 0;
+  const used = new Set<number>();
+  let empty = 0;
+  for (const [r, c] of cage.cells) {
+    const value = board[r]![c];
+    if (value === null || value === undefined) {
+      empty++;
+    } else {
+      filled += value;
+      used.add(value);
+    }
   }
-  return a;
+  const remaining = cage.sum - filled;
+  const candidates =
+    empty === 0 ? [] : cageCombinations(remaining, empty).filter((combo) => combo.every((d) => !used.has(d)));
+  return { remaining, empty, candidates };
 }

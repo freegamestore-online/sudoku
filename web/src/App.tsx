@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GameShell, GameTopbar, GameAuth, useGameSounds } from "@freegamestore/games";
 import { useLeaderboard } from '@freegamestore/games';
 
@@ -11,6 +11,9 @@ function AudioBridge({ apiRef }: { apiRef: React.MutableRefObject<SoundsApi | nu
 }
 
 import { generatePuzzle, checkSolution, completedRegions, isBoardComplete } from "./lib/sudoku";
+import { cageIndexMap, cageLabelCell, cageStatus, generateKiller, type Cage, type CageStatus } from "./lib/killer";
+import { dailyKey, dailyKillerPuzzle, KILLER_DAILY_GAME_ID } from "./lib/daily";
+import { hasPostedKillerDaily, markPostedKillerDaily } from "./lib/dailyPost";
 import { Celebration, ParticleLayer, prefersReducedMotion, type ParticleLayerHandle } from "./feel";
 import type { Board, Difficulty, Notes } from "./types";
 
@@ -18,6 +21,38 @@ import type { Board, Difficulty, Notes } from "./types";
 const SHIMMER_MS = 700;
 const ACCENT_HEX = "#2563eb";
 const SUCCESS_HEX = "#16a34a";
+
+/** Classic is the random game; Killer adds cage sums; Daily Killer is one Killer puzzle per UTC day. */
+type Mode = "classic" | "killer" | "daily";
+const MODES: { id: Mode; label: string }[] = [
+  { id: "classic", label: "Classic" },
+  { id: "killer", label: "Killer" },
+  { id: "daily", label: "Daily Killer" },
+];
+
+/** The puzzle for a mode. Killer modes start with an empty grid and a cage layout; there are no givens. */
+function buildGame(mode: Mode, diff: Difficulty): { puzzle: Board; solution: number[][]; cages: Cage[] | null; date: string | null } {
+  if (mode === "classic") {
+    const { puzzle, solution } = generatePuzzle(diff);
+    return { puzzle, solution, cages: null, date: null };
+  }
+  const date = mode === "daily" ? dailyKey() : null;
+  const killer = date ? dailyKillerPuzzle(date) : generateKiller();
+  return {
+    puzzle: killer.solution.map((row) => row.map((): null => null)),
+    solution: killer.solution,
+    cages: killer.cages,
+    date,
+  };
+}
+
+/** One line for the sum helper: what a cage still needs, and the digit sets that could fill it. */
+function describeCage({ remaining, empty, candidates }: CageStatus): string {
+  if (empty === 0) return remaining === 0 ? "Cage complete" : `Cage over by ${-remaining}`;
+  const cells = `${empty} empty ${empty === 1 ? "cell" : "cells"}`;
+  if (candidates.length === 0) return `Cage: ${remaining} left in ${cells}, no digits fit`;
+  return `Cage: ${remaining} left in ${cells} · ${candidates.map((combo) => combo.join("+")).join(", ")}`;
+}
 
 function createEmptyNotes(): Notes {
   return Array.from({ length: 9 }, () =>
@@ -45,18 +80,27 @@ export default function App() {
   const [scoreSubmitted, setScoreSubmitted] = useState(false);
   const [solveBurst, setSolveBurst] = useState<string | null>(null);
   const [shimmering, setShimmering] = useState<ReadonlySet<string>>(() => new Set());
+  const [mode, setMode] = useState<Mode>("classic");
+  // Cage layout for the Killer modes. Null in Classic.
+  const [cages, setCages] = useState<Cage[] | null>(null);
+  // The UTC day of the current Daily Killer, captured at start so a midnight rollover does not change it.
+  const [dailyDate, setDailyDate] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const particleRef = useRef<ParticleLayerHandle>(null);
   const boardRef = useRef<HTMLDivElement>(null);
 
   const { submitScore } = useLeaderboard("sudoku");
+  const { submitScore: submitDailyScore } = useLeaderboard(KILLER_DAILY_GAME_ID);
   const audioRef = useRef<SoundsApi | null>(null);
 
-  const startNewGame = useCallback((diff: Difficulty) => {
-    const { puzzle, solution: sol } = generatePuzzle(diff);
-    setBoard(puzzle.map((row) => [...row]));
-    setSolution(sol);
-    setGivens(puzzle.map((row) => row.map((cell) => cell !== null)));
+  const startGame = useCallback((next: Mode, diff: Difficulty) => {
+    const game = buildGame(next, diff);
+    setBoard(game.puzzle.map((row) => [...row]));
+    setSolution(game.solution);
+    setGivens(game.puzzle.map((row) => row.map((cell) => cell !== null)));
+    setCages(game.cages);
+    setDailyDate(game.date);
+    setMode(next);
     setSelectedCell(null);
     setNotesMode(false);
     setNotes(createEmptyNotes());
@@ -69,8 +113,19 @@ export default function App() {
 
   // Start first game
   useEffect(() => {
-    startNewGame("easy");
-  }, [startNewGame]);
+    startGame("classic", "easy");
+  }, [startGame]);
+
+  // Cage lookups for the Killer board: which cage each cell is in, and where each sum label goes.
+  const cageIndex = useMemo(() => (cages ? cageIndexMap(cages) : null), [cages]);
+  const cageLabels = useMemo(() => {
+    const labels = new Map<string, number>();
+    for (const cage of cages ?? []) {
+      const [r, c] = cageLabelCell(cage);
+      labels.set(`${r}-${c}`, cage.sum);
+    }
+    return labels;
+  }, [cages]);
 
   // Timer
   useEffect(() => {
@@ -94,13 +149,24 @@ export default function App() {
     }
   }, [board, solution, gameWon]);
 
-  // Submit score on win
+  // Submit score on win. Classic times go to the classic board; a Daily Killer time goes to
+  // its own board, once per device per day. Random Killer is not posted.
   useEffect(() => {
-    if (gameWon && !scoreSubmitted) {
-      setScoreSubmitted(true);
+    if (!gameWon || scoreSubmitted) return;
+    setScoreSubmitted(true);
+    if (mode === "classic") {
       submitScore(timer);
+    } else if (mode === "daily" && dailyDate && !hasPostedKillerDaily(dailyDate)) {
+      // An "Invalid game" reply or a network failure is not shown. Nothing is marked posted,
+      // so the next win today can try again.
+      submitDailyScore(timer).then(
+        (posted) => {
+          if (posted.ok) markPostedKillerDaily(dailyDate);
+        },
+        () => {},
+      );
     }
-  }, [gameWon, scoreSubmitted, timer, submitScore]);
+  }, [gameWon, scoreSubmitted, timer, submitScore, submitDailyScore, mode, dailyDate]);
 
   const handleCellClick = useCallback((row: number, col: number) => {
     setSelectedCell([row, col]);
@@ -273,11 +339,14 @@ export default function App() {
       color = "var(--accent)";
     }
 
-    // Border logic for 3x3 boxes
+    // Border logic: solid lines for 3x3 boxes, dashed lines where a Killer cage ends inside a box.
+    const cageRightEdge = cageIndex !== null && col < 8 && cageIndex[row]![col + 1] !== cageIndex[row]![col];
+    const cageBottomEdge = cageIndex !== null && row < 8 && cageIndex[row + 1]![col] !== cageIndex[row]![col];
+    const cageEdge = "1.5px dashed var(--ink)";
     const borderRight =
-      col === 2 || col === 5 ? "2px solid var(--line-strong)" : "1px solid var(--line)";
+      col === 2 || col === 5 ? "2px solid var(--line-strong)" : cageRightEdge ? cageEdge : "1px solid var(--line)";
     const borderBottom =
-      row === 2 || row === 5 ? "2px solid var(--line-strong)" : "1px solid var(--line)";
+      row === 2 || row === 5 ? "2px solid var(--line-strong)" : cageBottomEdge ? cageEdge : "1px solid var(--line)";
 
     return {
       background: bg,
@@ -290,6 +359,13 @@ export default function App() {
       fontFamily: isGiven ? "Fraunces, serif" : "Manrope, system-ui, sans-serif",
     };
   }
+
+  // The sum helper follows the selected cell's cage.
+  const selectedCageStatus = useMemo(() => {
+    if (!cages || !cageIndex || !selectedCell || board.length === 0) return null;
+    const index = cageIndex[selectedCell[0]]![selectedCell[1]]!;
+    return index >= 0 ? cageStatus(cages[index]!, board) : null;
+  }, [cages, cageIndex, selectedCell, board]);
 
   return (
     <GameShell
@@ -316,7 +392,9 @@ export default function App() {
               <h4 style={{ fontWeight: 600 }}>Controls</h4>
               <ul><li>Tap a cell, then tap a number to place it</li><li>Use Notes mode for pencil marks</li><li>Arrow keys to navigate, Backspace to erase</li></ul>
               <h4 style={{ fontWeight: 600 }}>Difficulty</h4>
-              <ul><li>Three levels: Easy, Medium, Hard</li></ul>
+              <ul><li>Classic has three levels: Easy, Medium, Hard</li></ul>
+              <h4 style={{ fontWeight: 600 }}>Killer</h4>
+              <ul><li>Dashed lines outline cages. Digits in a cage are all different and add up to the small number in its top-left cell</li><li>The line under the grid shows what a cage still needs</li><li>Daily Killer is the same puzzle for everyone on a UTC day</li></ul>
             </div>
           }
         />
@@ -346,41 +424,78 @@ export default function App() {
                 Solved in {formatTime(timer)} with {errors} error{errors !== 1 ? "s" : ""}
               </p>
               <div className="flex gap-2 mt-2">
-                {(["easy", "medium", "hard"] as const).map((d) => (
+                {mode === "classic" ? (
+                  (["easy", "medium", "hard"] as const).map((d) => (
+                    <button
+                      key={d}
+                      onClick={() => startGame("classic", d)}
+                      className="px-4 py-2 text-sm font-semibold capitalize min-h-[2.75rem]"
+                      style={{
+                        borderRadius: "0.75rem",
+                        background: "var(--accent)",
+                        color: "#fff",
+                      }}
+                    >
+                      {d}
+                    </button>
+                  ))
+                ) : (
                   <button
-                    key={d}
-                    onClick={() => startNewGame(d)}
-                    className="px-4 py-2 text-sm font-semibold capitalize min-h-[2.75rem]"
+                    onClick={() => startGame("killer", difficulty)}
+                    className="px-4 py-2 text-sm font-semibold min-h-[2.75rem]"
                     style={{
                       borderRadius: "0.75rem",
                       background: "var(--accent)",
                       color: "#fff",
                     }}
                   >
-                    {d}
+                    New Killer
                   </button>
-                ))}
+                )}
               </div>
             </div>
           )}
 
-          {/* Difficulty selector */}
+          {/* Mode selector, with the difficulty for Classic */}
           <div className="flex gap-1">
-            {(["easy", "medium", "hard"] as const).map((d) => (
+            {MODES.map(({ id, label }) => (
               <button
-                key={d}
-                onClick={() => startNewGame(d)}
-                className="px-3 py-1.5 text-xs font-semibold capitalize min-h-[2.75rem]"
+                key={id}
+                onClick={() => startGame(id, difficulty)}
+                className="px-3 py-1.5 text-xs font-semibold min-h-[2.75rem]"
                 style={{
                   borderRadius: "0.75rem",
-                  background: difficulty === d ? "var(--accent)" : "var(--line)",
-                  color: difficulty === d ? "#fff" : "var(--ink)",
+                  background: mode === id ? "var(--accent)" : "var(--line)",
+                  color: mode === id ? "#fff" : "var(--ink)",
                 }}
               >
-                {d}
+                {label}
               </button>
             ))}
           </div>
+          {mode === "classic" && (
+            <div className="flex gap-1">
+              {(["easy", "medium", "hard"] as const).map((d) => (
+                <button
+                  key={d}
+                  onClick={() => startGame("classic", d)}
+                  className="px-3 py-1.5 text-xs font-semibold capitalize min-h-[2.75rem]"
+                  style={{
+                    borderRadius: "0.75rem",
+                    background: difficulty === d ? "var(--accent)" : "var(--line)",
+                    color: difficulty === d ? "#fff" : "var(--ink)",
+                  }}
+                >
+                  {d}
+                </button>
+              ))}
+            </div>
+          )}
+          {mode === "daily" && dailyDate && (
+            <p className="text-xs" style={{ color: "var(--muted)" }}>
+              Daily Killer for {dailyDate} (UTC)
+            </p>
+          )}
 
           {/* Sudoku Grid */}
           {board.length > 0 && (
@@ -410,6 +525,14 @@ export default function App() {
                       className={`flex items-center justify-center relative select-none${shimmering.has(`${r}-${c}`) ? " region-shimmer" : ""}`}
                       style={getCellStyle(r, c)}
                     >
+                      {cageLabels.has(`${r}-${c}`) && (
+                        <span
+                          className="absolute left-0.5 top-0 font-semibold leading-none pointer-events-none"
+                          style={{ fontSize: "clamp(0.5rem, 1.6vmin, 0.7rem)", color: "var(--ink)" }}
+                        >
+                          {cageLabels.get(`${r}-${c}`)}
+                        </span>
+                      )}
                       {cell !== null ? (
                         cell
                       ) : notes[r]![c]!.size > 0 ? (
@@ -421,6 +544,13 @@ export default function App() {
               </div>
               <ParticleLayer ref={particleRef} />
             </div>
+          )}
+
+          {/* Sum helper: what the selected cage still needs */}
+          {selectedCageStatus && (
+            <p className="text-sm text-center" aria-live="polite" style={{ color: "var(--muted)" }}>
+              {describeCage(selectedCageStatus)}
+            </p>
           )}
 
           {/* Number Pad */}

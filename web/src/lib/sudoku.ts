@@ -1,7 +1,7 @@
 import type { CellValue, Difficulty } from "../types";
 
 /** Generate a complete valid 9x9 Sudoku grid using backtracking with randomized candidates. */
-export function generateSolution(): number[][] {
+export function generateSolution(random: () => number = Math.random): number[][] {
   const board: number[][] = Array.from({ length: 9 }, () => Array(9).fill(0) as number[]);
 
   function solve(pos: number): boolean {
@@ -9,7 +9,7 @@ export function generateSolution(): number[][] {
     const row = Math.floor(pos / 9);
     const col = pos % 9;
 
-    const candidates = shuffle([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    const candidates = shuffle([1, 2, 3, 4, 5, 6, 7, 8, 9], random);
     for (const num of candidates) {
       if (canPlace(board, row, col, num)) {
         board[row]![col] = num;
@@ -142,10 +142,11 @@ function canPlace(board: number[][], row: number, col: number, num: number): boo
   return true;
 }
 
-function shuffle<T>(arr: T[]): T[] {
+/** Fisher-Yates shuffle. `random` returns values in [0, 1), so a seeded source gives the same order every time. */
+export function shuffle<T>(arr: T[], random: () => number = Math.random): T[] {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(random() * (i + 1));
     [a[i], a[j]] = [a[j]!, a[i]!];
   }
   return a;

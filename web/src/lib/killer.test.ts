@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { cageCombinations, generateKiller, solveKiller, MAX_CAGE_SIZE, type Cage } from "./killer";
+import {
+  cageCombinations,
+  cageIndexMap,
+  cageLabelCell,
+  cageStatus,
+  generateKiller,
+  solveKiller,
+  MAX_CAGE_SIZE,
+  type Cage,
+} from "./killer";
 import { checkSolution } from "./sudoku";
 
 /** One cage per row, each summing to 45. Any valid Sudoku grid satisfies them. */
@@ -92,4 +101,60 @@ describe("generateKiller", () => {
       expect(checkSolution(solutions[0]!, puzzle.solution)).toBe(true);
     }
   }, 60_000);
+});
+
+describe("cage helpers", () => {
+  const cage: Cage = {
+    cells: [
+      [0, 1],
+      [0, 0],
+      [1, 0],
+    ],
+    sum: 10,
+  };
+
+  it("indexes each cell to its cage", () => {
+    const index = cageIndexMap([cage]);
+    expect(index[0]![0]).toBe(0);
+    expect(index[0]![1]).toBe(0);
+    expect(index[1]![0]).toBe(0);
+    expect(index[8]![8]).toBe(-1);
+  });
+
+  it("places the sum label on the first cell in reading order", () => {
+    expect(cageLabelCell(cage)).toEqual([0, 0]);
+  });
+
+  it("reports what a cage still needs", () => {
+    const board: (number | null)[][] = Array.from({ length: 9 }, () => Array<number | null>(9).fill(null));
+    const empty = cageStatus(cage, board);
+    expect(empty.remaining).toBe(10);
+    expect(empty.empty).toBe(3);
+    // Three cells summing to 10 with distinct digits: 1+2+7, 1+3+6, 1+4+5, 2+3+5.
+    expect(empty.candidates).toEqual([
+      [1, 2, 7],
+      [1, 3, 6],
+      [1, 4, 5],
+      [2, 3, 5],
+    ]);
+
+    board[0]![0] = 1;
+    board[0]![1] = 2;
+    const partial = cageStatus(cage, board);
+    expect(partial.remaining).toBe(7);
+    expect(partial.empty).toBe(1);
+    // One cell left needing 7, and 1 and 2 are already in the cage.
+    expect(partial.candidates).toEqual([[7]]);
+  });
+
+  it("reports no candidates for a finished cage", () => {
+    const board: (number | null)[][] = Array.from({ length: 9 }, () => Array<number | null>(9).fill(null));
+    board[0]![0] = 1;
+    board[0]![1] = 3;
+    board[1]![0] = 6;
+    const done = cageStatus(cage, board);
+    expect(done.remaining).toBe(0);
+    expect(done.empty).toBe(0);
+    expect(done.candidates).toEqual([]);
+  });
 });
