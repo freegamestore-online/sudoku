@@ -98,6 +98,31 @@ export function checkSolution(board: CellValue[][], solution: number[][]): boole
   return true;
 }
 
+/**
+ * The row, column and 3x3 box through (row, col) that are now fully filled with
+ * the correct numbers. Call it after a correct placement; a group is only
+ * returned when it is complete, so an unrelated complete group is never reported.
+ */
+export function completedRegions(
+  board: CellValue[][],
+  solution: number[][],
+  row: number,
+  col: number,
+): [number, number][][] {
+  const rowCells: [number, number][] = Array.from({ length: 9 }, (_, c) => [row, c]);
+  const colCells: [number, number][] = Array.from({ length: 9 }, (_, r) => [r, col]);
+  const boxRow = Math.floor(row / 3) * 3;
+  const boxCol = Math.floor(col / 3) * 3;
+  const boxCells: [number, number][] = [];
+  for (let r = boxRow; r < boxRow + 3; r++) {
+    for (let c = boxCol; c < boxCol + 3; c++) boxCells.push([r, c]);
+  }
+
+  return [rowCells, colCells, boxCells].filter((group) =>
+    group.every(([r, c]) => board[r]![c] === solution[r]![c]),
+  );
+}
+
 // --- helpers ---
 
 function canPlace(board: number[][], row: number, col: number, num: number): boolean {

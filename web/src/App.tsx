@@ -10,8 +10,14 @@ function AudioBridge({ apiRef }: { apiRef: React.MutableRefObject<SoundsApi | nu
   return null;
 }
 
-import { generatePuzzle, checkSolution, isBoardComplete } from "./lib/sudoku";
+import { generatePuzzle, checkSolution, completedRegions, isBoardComplete } from "./lib/sudoku";
+import { Celebration, ParticleLayer, prefersReducedMotion, type ParticleLayerHandle } from "./feel";
 import type { Board, Difficulty, Notes } from "./types";
+
+/** How long a completed row, column or box keeps its shimmer, in ms. Matches the CSS animation. */
+const SHIMMER_MS = 700;
+const ACCENT_HEX = "#2563eb";
+const SUCCESS_HEX = "#16a34a";
 
 function createEmptyNotes(): Notes {
   return Array.from({ length: 9 }, () =>
@@ -37,7 +43,11 @@ export default function App() {
   const [gameWon, setGameWon] = useState(false);
   const [errors, setErrors] = useState(0);
   const [scoreSubmitted, setScoreSubmitted] = useState(false);
+  const [solveBurst, setSolveBurst] = useState<string | null>(null);
+  const [shimmering, setShimmering] = useState<ReadonlySet<string>>(() => new Set());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const particleRef = useRef<ParticleLayerHandle>(null);
+  const boardRef = useRef<HTMLDivElement>(null);
 
   const { submitScore } = useLeaderboard("sudoku");
   const audioRef = useRef<SoundsApi | null>(null);
@@ -79,7 +89,8 @@ export default function App() {
     if (board.length === 0 || gameWon) return;
     if (isBoardComplete(board) && checkSolution(board, solution)) {
       setGameWon(true);
-      audioRef.current?.playLevelUp();
+      // The celebration plays its own level-up sound.
+      setSolveBurst("solve");
     }
   }, [board, solution, gameWon]);
 
@@ -94,6 +105,47 @@ export default function App() {
   const handleCellClick = useCallback((row: number, col: number) => {
     setSelectedCell([row, col]);
   }, []);
+
+  const endSolveBurst = useCallback(() => setSolveBurst(null), []);
+
+  /** Centre of a cell in the particle layer's pixel space, which covers the whole grid. */
+  function cellCentre(row: number, col: number): [number, number] {
+    const { width, height } = boardRef.current?.getBoundingClientRect() ?? { width: 0, height: 0 };
+    return [((col + 0.5) * width) / 9, ((row + 0.5) * height) / 9];
+  }
+
+  /** Small burst where a correct number lands. The layer skips it under reduced motion. */
+  function popCell(row: number, col: number) {
+    const [x, y] = cellCentre(row, col);
+    particleRef.current?.burst(x, y, [ACCENT_HEX], { count: 10, speed: [120, 260], size: [3, 5], life: 0.45 });
+  }
+
+  /** Shimmer and burst for each row, column or box that a correct number just finished. */
+  function celebrateRegions(groups: [number, number][][]) {
+    for (const group of groups) {
+      const [sumRow, sumCol] = group.reduce<[number, number]>(
+        ([r, c], [gr, gc]) => [r + gr, c + gc],
+        [0, 0],
+      );
+      const [x, y] = cellCentre(sumRow / group.length, sumCol / group.length);
+      particleRef.current?.burst(x, y, [SUCCESS_HEX, ACCENT_HEX], {
+        count: 18,
+        speed: [160, 340],
+        size: [3, 6],
+        life: 0.7,
+      });
+    }
+    if (prefersReducedMotion()) return;
+    const keys = groups.flat().map(([r, c]) => `${r}-${c}`);
+    setShimmering((prev) => new Set([...prev, ...keys]));
+    window.setTimeout(() => {
+      setShimmering((prev) => {
+        const next = new Set(prev);
+        for (const key of keys) next.delete(key);
+        return next;
+      });
+    }, SHIMMER_MS);
+  }
 
   const handleNumberInput = useCallback(
     (num: number) => {
@@ -113,11 +165,10 @@ export default function App() {
           return next;
         });
       } else {
-        setBoard((prev) => {
-          const next = prev.map((r) => [...r]);
-          next[row]![col] = num;
-          return next;
-        });
+        const wasNum = board[row]?.[col];
+        const nextBoard = board.map((r) => [...r]);
+        nextBoard[row]![col] = num;
+        setBoard(nextBoard);
         // Clear notes for this cell when placing a number
         setNotes((prev) => {
           const next = prev.map((r) => r.map((s) => new Set(s)));
@@ -130,10 +181,15 @@ export default function App() {
           audioRef.current?.playError();
         } else {
           audioRef.current?.playTick();
+          // Re-entering the same correct number is not a new fill.
+          if (wasNum !== num) {
+            popCell(row, col);
+            celebrateRegions(completedRegions(nextBoard, solution, row, col));
+          }
         }
       }
     },
-    [selectedCell, gameWon, givens, notesMode, solution],
+    [selectedCell, gameWon, givens, notesMode, solution, board],
   );
 
   const handleErase = useCallback(() => {
@@ -268,6 +324,7 @@ export default function App() {
     >
       <AudioBridge apiRef={audioRef} />
       <div className="relative w-full h-full" style={{ overflowY: "auto" }}>
+        {solveBurst && <Celebration id={solveBurst} label="Solved!" onDone={endSolveBurst} />}
         <div className="flex flex-col items-center justify-center h-full gap-4 p-4">
           {/* Win overlay */}
           {gameWon && (
@@ -328,7 +385,8 @@ export default function App() {
           {/* Sudoku Grid */}
           {board.length > 0 && (
             <div
-              className="w-full"
+              ref={boardRef}
+              className="w-full relative"
               style={{
                 maxWidth: "min(90vw, 90vh - 12rem, 32rem)",
                 aspectRatio: "1",
@@ -349,7 +407,7 @@ export default function App() {
                     <button
                       key={`${r}-${c}`}
                       onClick={() => handleCellClick(r, c)}
-                      className="flex items-center justify-center relative select-none"
+                      className={`flex items-center justify-center relative select-none${shimmering.has(`${r}-${c}`) ? " region-shimmer" : ""}`}
                       style={getCellStyle(r, c)}
                     >
                       {cell !== null ? (
@@ -361,6 +419,7 @@ export default function App() {
                   )),
                 )}
               </div>
+              <ParticleLayer ref={particleRef} />
             </div>
           )}
 
