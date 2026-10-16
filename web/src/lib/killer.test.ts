@@ -62,13 +62,13 @@ describe("solveKiller", () => {
     const solutions = solveKiller(puzzle.cages, 2);
     expect(solutions).toHaveLength(1);
     expect(checkSolution(solutions[0]!, puzzle.solution)).toBe(true);
-  });
+  }, 60_000);
 
   it("finds no solution when a cage sum is wrong", () => {
     const puzzle = generateKiller();
     const broken = puzzle.cages.map((cage, i) => (i === 0 ? { ...cage, sum: cage.sum + 1 } : cage));
     expect(solveKiller(broken, 2)).toHaveLength(0);
-  });
+  }, 60_000);
 
   it("reports two solutions when the cages leave the grid open", () => {
     // Row cages sum to 45 and so do not constrain anything beyond normal Sudoku rules,

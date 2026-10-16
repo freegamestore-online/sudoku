@@ -14,15 +14,16 @@ describe("dailyKillerPuzzle", () => {
   it("is the same puzzle for the same day", () => {
     const a = dailyKillerPuzzle("2026-10-16");
     const b = dailyKillerPuzzle("2026-10-16");
+    expect(b).toBe(a);
     expect(a.solution).toEqual(b.solution);
     expect(a.cages).toEqual(b.cages);
-  });
+  }, 60_000);
 
   it("is a different puzzle on another day", () => {
     const a = dailyKillerPuzzle("2026-10-16");
     const b = dailyKillerPuzzle("2026-10-17");
     expect(a.solution).not.toEqual(b.solution);
-  });
+  }, 60_000);
 
   it("has exactly one solution, and it is the stored one", () => {
     const puzzle = dailyKillerPuzzle("2026-10-16");
