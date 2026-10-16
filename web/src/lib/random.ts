@@ -19,3 +19,8 @@ export function seededRandom(seed: number): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+/** A fresh seed for an unseeded puzzle, so each random game differs. */
+export function randomSeed(): number {
+  return Math.floor(Math.random() * 4294967296);
+}

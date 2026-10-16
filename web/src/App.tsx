@@ -13,7 +13,11 @@ function AudioBridge({ apiRef }: { apiRef: React.MutableRefObject<SoundsApi | nu
 import { generatePuzzle, checkSolution, completedRegions, isBoardComplete } from "./lib/sudoku";
 import { cageIndexMap, cageLabelCell, cageStatus, generateKiller, type Cage, type CageStatus } from "./lib/killer";
 import { dailyKey, dailyKillerPuzzle, KILLER_DAILY_GAME_ID } from "./lib/daily";
-import { hasPostedKillerDaily, markPostedKillerDaily } from "./lib/dailyPost";
+import { dailyQueensPuzzle, QUEENS_DAILY_GAME_ID, QUEENS_N } from "./lib/dailyQueens";
+import { hasPostedDaily, markPostedDaily } from "./lib/dailyPost";
+import { generateQueens, queensConflicts, type QueensPuzzle } from "./lib/queens";
+import { randomSeed } from "./lib/random";
+import { QueensBoard } from "./QueensBoard";
 import { Celebration, ParticleLayer, prefersReducedMotion, type ParticleLayerHandle } from "./feel";
 import type { Board, Difficulty, Notes } from "./types";
 
@@ -22,27 +26,55 @@ const SHIMMER_MS = 700;
 const ACCENT_HEX = "#2563eb";
 const SUCCESS_HEX = "#16a34a";
 
-/** Classic is the random game; Killer adds cage sums; Daily Killer is one Killer puzzle per UTC day. */
-type Mode = "classic" | "killer" | "daily";
+/**
+ * Classic is the random game; Killer adds cage sums; Queens places one queen per row, column
+ * and region. The daily modes are one puzzle per UTC day, the same for everyone.
+ */
+type Mode = "classic" | "killer" | "killer-daily" | "queens" | "queens-daily";
 const MODES: { id: Mode; label: string }[] = [
   { id: "classic", label: "Classic" },
   { id: "killer", label: "Killer" },
-  { id: "daily", label: "Daily Killer" },
+  { id: "killer-daily", label: "Daily Killer" },
+  { id: "queens", label: "Queens" },
+  { id: "queens-daily", label: "Daily Queens" },
 ];
+/** The random game a mode offers from its win screen. */
+const RANDOM_MODE: Record<Mode, Mode> = {
+  classic: "classic",
+  killer: "killer",
+  "killer-daily": "killer",
+  queens: "queens",
+  "queens-daily": "queens",
+};
 
-/** The puzzle for a mode. Killer modes start with an empty grid and a cage layout; there are no givens. */
-function buildGame(mode: Mode, diff: Difficulty): { puzzle: Board; solution: number[][]; cages: Cage[] | null; date: string | null } {
+/** Whether a mode plays Queens rather than the number grid. */
+const isQueensMode = (mode: Mode) => mode === "queens" || mode === "queens-daily";
+
+/**
+ * The puzzle for a mode. Killer and Queens start empty, Killer with a cage layout and no
+ * givens; Queens has its own board, so the number grid is empty.
+ */
+function buildGame(
+  mode: Mode,
+  diff: Difficulty,
+): { puzzle: Board; solution: number[][]; cages: Cage[] | null; date: string | null; queens: QueensPuzzle | null } {
   if (mode === "classic") {
     const { puzzle, solution } = generatePuzzle(diff);
-    return { puzzle, solution, cages: null, date: null };
+    return { puzzle, solution, cages: null, date: null, queens: null };
   }
-  const date = mode === "daily" ? dailyKey() : null;
+  if (isQueensMode(mode)) {
+    const date = mode === "queens-daily" ? dailyKey() : null;
+    const queens = date ? dailyQueensPuzzle(date) : generateQueens(QUEENS_N, randomSeed());
+    return { puzzle: [], solution: [], cages: null, date, queens };
+  }
+  const date = mode === "killer-daily" ? dailyKey() : null;
   const killer = date ? dailyKillerPuzzle(date) : generateKiller();
   return {
     puzzle: killer.solution.map((row) => row.map((): null => null)),
     solution: killer.solution,
     cages: killer.cages,
     date,
+    queens: null,
   };
 }
 
@@ -85,12 +117,16 @@ export default function App() {
   const [cages, setCages] = useState<Cage[] | null>(null);
   // The UTC day of the current Daily Killer, captured at start so a midnight rollover does not change it.
   const [dailyDate, setDailyDate] = useState<string | null>(null);
+  // Queens: the puzzle and the queens the player has placed, as "row-col" keys.
+  const [queensPuzzle, setQueensPuzzle] = useState<QueensPuzzle | null>(null);
+  const [queensPlaced, setQueensPlaced] = useState<ReadonlySet<string>>(() => new Set());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const particleRef = useRef<ParticleLayerHandle>(null);
   const boardRef = useRef<HTMLDivElement>(null);
 
   const { submitScore } = useLeaderboard("sudoku");
-  const { submitScore: submitDailyScore } = useLeaderboard(KILLER_DAILY_GAME_ID);
+  const { submitScore: submitKillerDaily } = useLeaderboard(KILLER_DAILY_GAME_ID);
+  const { submitScore: submitQueensDaily } = useLeaderboard(QUEENS_DAILY_GAME_ID);
   const audioRef = useRef<SoundsApi | null>(null);
 
   const startGame = useCallback((next: Mode, diff: Difficulty) => {
@@ -100,6 +136,8 @@ export default function App() {
     setGivens(game.puzzle.map((row) => row.map((cell) => cell !== null)));
     setCages(game.cages);
     setDailyDate(game.date);
+    setQueensPuzzle(game.queens);
+    setQueensPlaced(new Set());
     setMode(next);
     setSelectedCell(null);
     setNotesMode(false);
@@ -129,7 +167,8 @@ export default function App() {
 
   // Timer
   useEffect(() => {
-    if (gameWon || board.length === 0) {
+    const inPlay = queensPuzzle !== null || board.length > 0;
+    if (gameWon || !inPlay) {
       if (timerRef.current) clearInterval(timerRef.current);
       return;
     }
@@ -137,7 +176,7 @@ export default function App() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [gameWon, board.length]);
+  }, [gameWon, board.length, queensPuzzle]);
 
   // Check win condition
   useEffect(() => {
@@ -149,24 +188,62 @@ export default function App() {
     }
   }, [board, solution, gameWon]);
 
-  // Submit score on win. Classic times go to the classic board; a Daily Killer time goes to
-  // its own board, once per device per day. Random Killer is not posted.
+  // Queens win: every queen placed, none in conflict. With one solution that is the solution.
+  const queenList = useMemo(
+    () => [...queensPlaced].map((key): [number, number] => {
+      const [r, c] = key.split("-").map(Number) as [number, number];
+      return [r, c];
+    }),
+    [queensPlaced],
+  );
+  const queenConflicts = useMemo(
+    () => (queensPuzzle ? queensConflicts(queensPuzzle.colors, queenList) : new Set<string>()),
+    [queensPuzzle, queenList],
+  );
+  useEffect(() => {
+    if (!queensPuzzle || gameWon) return;
+    if (queensPlaced.size === queensPuzzle.n && queenConflicts.size === 0) {
+      setGameWon(true);
+      setSolveBurst("solve");
+    }
+  }, [queensPuzzle, queensPlaced, queenConflicts, gameWon]);
+
+  // Submit score on win. Classic times go to the classic board. A daily time goes to its
+  // game's board, once per device per day. Random Killer and Queens are not posted.
   useEffect(() => {
     if (!gameWon || scoreSubmitted) return;
     setScoreSubmitted(true);
+    const daily =
+      mode === "killer-daily" ? { game: "killer", submit: submitKillerDaily }
+      : mode === "queens-daily" ? { game: "queens", submit: submitQueensDaily }
+      : null;
     if (mode === "classic") {
       submitScore(timer);
-    } else if (mode === "daily" && dailyDate && !hasPostedKillerDaily(dailyDate)) {
+    } else if (daily && dailyDate && !hasPostedDaily(daily.game, dailyDate)) {
       // An "Invalid game" reply or a network failure is not shown. Nothing is marked posted,
       // so the next win today can try again.
-      submitDailyScore(timer).then(
+      daily.submit(timer).then(
         (posted) => {
-          if (posted.ok) markPostedKillerDaily(dailyDate);
+          if (posted.ok) markPostedDaily(daily.game, dailyDate);
         },
         () => {},
       );
     }
-  }, [gameWon, scoreSubmitted, timer, submitScore, submitDailyScore, mode, dailyDate]);
+  }, [gameWon, scoreSubmitted, timer, submitScore, submitKillerDaily, submitQueensDaily, mode, dailyDate]);
+
+  const toggleQueen = useCallback(
+    (row: number, col: number) => {
+      if (gameWon) return;
+      const key = `${row}-${col}`;
+      setQueensPlaced((prev) => {
+        const next = new Set(prev);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      });
+    },
+    [gameWon],
+  );
 
   const handleCellClick = useCallback((row: number, col: number) => {
     setSelectedCell([row, col]);
@@ -215,7 +292,7 @@ export default function App() {
 
   const handleNumberInput = useCallback(
     (num: number) => {
-      if (!selectedCell || gameWon) return;
+      if (!selectedCell || gameWon || board.length === 0) return;
       const [row, col] = selectedCell;
       if (givens[row]?.[col]) return;
 
@@ -259,7 +336,7 @@ export default function App() {
   );
 
   const handleErase = useCallback(() => {
-    if (!selectedCell || gameWon) return;
+    if (!selectedCell || gameWon || board.length === 0) return;
     const [row, col] = selectedCell;
     if (givens[row]?.[col]) return;
 
@@ -273,7 +350,7 @@ export default function App() {
       next[row]![col] = new Set();
       return next;
     });
-  }, [selectedCell, gameWon, givens]);
+  }, [selectedCell, gameWon, givens, board.length]);
 
   // Keyboard handling
   useEffect(() => {
@@ -374,13 +451,17 @@ export default function App() {
           title="Sudoku"
           stats={[
             { label: "Time", value: formatTime(timer) },
-            { label: "Errors", value: errors, accent: errors > 0 },
+            isQueensMode(mode)
+              ? { label: "Conflicts", value: queenConflicts.size, accent: queenConflicts.size > 0 }
+              : { label: "Errors", value: errors, accent: errors > 0 },
           ]}
           actions={
             <>
-              <button className="min-h-[2.75rem] min-w-[2.75rem]" onClick={() => setNotesMode((n) => !n)}>
-                Notes {notesMode ? "ON" : "OFF"}
-              </button>
+              {!isQueensMode(mode) && (
+                <button className="min-h-[2.75rem] min-w-[2.75rem]" onClick={() => setNotesMode((n) => !n)}>
+                  Notes {notesMode ? "ON" : "OFF"}
+                </button>
+              )}
               <GameAuth />
             </>
           }
@@ -393,6 +474,8 @@ export default function App() {
               <ul><li>Tap a cell, then tap a number to place it</li><li>Use Notes mode for pencil marks</li><li>Arrow keys to navigate, Backspace to erase</li></ul>
               <h4 style={{ fontWeight: 600 }}>Difficulty</h4>
               <ul><li>Classic has three levels: Easy, Medium, Hard</li></ul>
+              <h4 style={{ fontWeight: 600 }}>Queens</h4>
+              <ul><li>Place one queen in each row, column and coloured region</li><li>Queens cannot touch, diagonals included</li><li>Tap a cell to place or remove a queen. Red marks a conflict</li></ul>
               <h4 style={{ fontWeight: 600 }}>Killer</h4>
               <ul><li>Dashed lines outline cages. Digits in a cage are all different and add up to the small number in its top-left cell</li><li>The line under the grid shows what a cage still needs</li><li>Daily Killer is the same puzzle for everyone on a UTC day</li></ul>
             </div>
@@ -441,7 +524,7 @@ export default function App() {
                   ))
                 ) : (
                   <button
-                    onClick={() => startGame("killer", difficulty)}
+                    onClick={() => startGame(RANDOM_MODE[mode], difficulty)}
                     className="px-4 py-2 text-sm font-semibold min-h-[2.75rem]"
                     style={{
                       borderRadius: "0.75rem",
@@ -449,7 +532,7 @@ export default function App() {
                       color: "#fff",
                     }}
                   >
-                    New Killer
+                    {`New ${MODES.find((m) => m.id === RANDOM_MODE[mode])!.label}`}
                   </button>
                 )}
               </div>
@@ -457,7 +540,7 @@ export default function App() {
           )}
 
           {/* Mode selector, with the difficulty for Classic */}
-          <div className="flex gap-1">
+          <div className="flex flex-wrap justify-center gap-1">
             {MODES.map(({ id, label }) => (
               <button
                 key={id}
@@ -491,14 +574,26 @@ export default function App() {
               ))}
             </div>
           )}
-          {mode === "daily" && dailyDate && (
+          {(mode === "killer-daily" || mode === "queens-daily") && dailyDate && (
             <p className="text-xs" style={{ color: "var(--muted)" }}>
-              Daily Killer for {dailyDate} (UTC)
+              {`${MODES.find((m) => m.id === mode)!.label} for ${dailyDate} (UTC)`}
             </p>
           )}
 
+          {/* Queens board */}
+          {queensPuzzle && (
+            <div className="w-full" style={{ maxWidth: "min(90vw, 90vh - 12rem, 32rem)" }}>
+              <QueensBoard
+                puzzle={queensPuzzle}
+                placed={queensPlaced}
+                conflicts={queenConflicts}
+                onToggle={toggleQueen}
+              />
+            </div>
+          )}
+
           {/* Sudoku Grid */}
-          {board.length > 0 && (
+          {!isQueensMode(mode) && board.length > 0 && (
             <div
               ref={boardRef}
               className="w-full relative"
@@ -554,7 +649,7 @@ export default function App() {
           )}
 
           {/* Number Pad */}
-          {!gameWon && (
+          {!gameWon && !isQueensMode(mode) && (
             <div className="flex flex-wrap justify-center gap-2 w-full" style={{ maxWidth: "24rem" }}>
               {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
                 <button

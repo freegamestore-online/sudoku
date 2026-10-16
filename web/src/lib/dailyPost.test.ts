@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hasPostedKillerDaily, markPostedKillerDaily } from "./dailyPost";
+import { hasPostedDaily, markPostedDaily } from "./dailyPost";
 
 function memoryStore() {
   const data = new Map<string, string>();
@@ -9,13 +9,19 @@ function memoryStore() {
   };
 }
 
-describe("Killer daily post tracking", () => {
+describe("daily post tracking", () => {
   it("is not posted until marked, and only for that day", () => {
     const store = memoryStore();
-    expect(hasPostedKillerDaily("2026-10-16", store)).toBe(false);
-    markPostedKillerDaily("2026-10-16", store);
-    expect(hasPostedKillerDaily("2026-10-16", store)).toBe(true);
-    expect(hasPostedKillerDaily("2026-10-17", store)).toBe(false);
+    expect(hasPostedDaily("killer", "2026-10-16", store)).toBe(false);
+    markPostedDaily("killer", "2026-10-16", store);
+    expect(hasPostedDaily("killer", "2026-10-16", store)).toBe(true);
+    expect(hasPostedDaily("killer", "2026-10-17", store)).toBe(false);
+  });
+
+  it("keeps each game's record apart", () => {
+    const store = memoryStore();
+    markPostedDaily("killer", "2026-10-16", store);
+    expect(hasPostedDaily("queens", "2026-10-16", store)).toBe(false);
   });
 
   it("treats blocked storage as not posted, without throwing", () => {
@@ -27,7 +33,7 @@ describe("Killer daily post tracking", () => {
         throw new Error("blocked");
       },
     };
-    expect(hasPostedKillerDaily("2026-10-16", blocked)).toBe(false);
-    expect(() => markPostedKillerDaily("2026-10-16", blocked)).not.toThrow();
+    expect(hasPostedDaily("killer", "2026-10-16", blocked)).toBe(false);
+    expect(() => markPostedDaily("killer", "2026-10-16", blocked)).not.toThrow();
   });
 });
