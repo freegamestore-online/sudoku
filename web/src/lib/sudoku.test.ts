@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { completedRegions, generateSolution } from "./sudoku";
+import { completedRegions, countSolutions, generatePuzzle, generateSolution } from "./sudoku";
 import type { CellValue } from "../types";
 
 function emptyBoard(): CellValue[][] {
@@ -31,4 +31,13 @@ describe("completedRegions", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]!.every(([, c]) => c === 0)).toBe(true);
   });
+});
+
+describe("generated puzzles", () => {
+  it.each(["easy", "medium", "hard"] as const)("keeps %s puzzles uniquely solvable", (difficulty) => {
+    const { puzzle, solution } = generatePuzzle(difficulty);
+    expect(countSolutions(puzzle, 2)).toBe(1);
+    expect(puzzle.flat().filter((cell) => cell === null).length).toBeGreaterThan(0);
+    expect(solution).toHaveLength(9);
+  }, 60_000);
 });

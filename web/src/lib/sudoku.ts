@@ -24,7 +24,7 @@ export function generateSolution(random: () => number = Math.random): number[][]
   return board;
 }
 
-/** Generate a puzzle by removing cells from a complete grid. */
+/** Generate a puzzle by removing cells from a complete grid while keeping its solution unique. */
 export function generatePuzzle(difficulty: Difficulty): {
   puzzle: CellValue[][];
   solution: number[][];
@@ -46,10 +46,53 @@ export function generatePuzzle(difficulty: Difficulty): {
     const row = Math.floor(pos / 9);
     const col = pos % 9;
     puzzle[row]![col] = null;
-    removed++;
+    if (countSolutions(puzzle, 2) === 1) removed++;
+    else puzzle[row]![col] = solution[row]![col]!;
   }
 
   return { puzzle, solution };
+}
+
+/** Count Sudoku completions, stopping at `limit`; used to keep generated puzzles unique. */
+export function countSolutions(board: CellValue[][], limit = 2): number {
+  const grid = board.map((row) => row.map((value) => value ?? 0));
+  let count = 0;
+
+  function search(): void {
+    if (count >= limit) return;
+    let bestRow = -1;
+    let bestCol = -1;
+    let bestCandidates: number[] = [];
+    for (let r = 0; r < 9; r++) {
+      for (let c = 0; c < 9; c++) {
+        if (grid[r]![c] !== 0) continue;
+        const candidates = [1, 2, 3, 4, 5, 6, 7, 8, 9].filter((n) =>
+          isValidPlacement(grid as CellValue[][], r, c, n),
+        );
+        if (candidates.length === 0) return;
+        if (bestRow === -1 || candidates.length < bestCandidates.length) {
+          bestRow = r;
+          bestCol = c;
+          bestCandidates = candidates;
+          if (candidates.length === 1) break;
+        }
+      }
+      if (bestCandidates.length === 1) break;
+    }
+    if (bestRow === -1) {
+      count++;
+      return;
+    }
+    for (const n of bestCandidates) {
+      grid[bestRow]![bestCol] = n;
+      search();
+      grid[bestRow]![bestCol] = 0;
+      if (count >= limit) return;
+    }
+  }
+
+  search();
+  return count;
 }
 
 /** Check if placing a number at (row, col) is valid (no conflicts in row/col/box). */
