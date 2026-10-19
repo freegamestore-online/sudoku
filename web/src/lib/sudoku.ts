@@ -25,11 +25,11 @@ export function generateSolution(random: () => number = Math.random): number[][]
 }
 
 /** Generate a puzzle by removing cells from a complete grid while keeping its solution unique. */
-export function generatePuzzle(difficulty: Difficulty): {
+export function generatePuzzle(difficulty: Difficulty, random: () => number = Math.random): {
   puzzle: CellValue[][];
   solution: number[][];
 } {
-  const solution = generateSolution();
+  const solution = generateSolution(random);
   const puzzle: CellValue[][] = solution.map((row) => [...row]);
 
   const cellsToRemove =
@@ -37,7 +37,7 @@ export function generatePuzzle(difficulty: Difficulty): {
 
   // Create a shuffled list of all 81 positions
   const positions = shuffle(
-    Array.from({ length: 81 }, (_, i) => i),
+    Array.from({ length: 81 }, (_, i) => i), random,
   );
 
   let removed = 0;

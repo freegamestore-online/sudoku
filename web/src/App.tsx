@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { GameShell, GameTopbar, GameAuth, useGameSounds } from "@freegamestore/games";
+import { GameShell, GameTopbar, GameAuth, GameThemeToggle, Leaderboard, useGameSounds } from "@freegamestore/games";
 import { useLeaderboard } from '@freegamestore/games';
 
 type SoundsApi = ReturnType<typeof useGameSounds>;
@@ -11,12 +11,12 @@ function AudioBridge({ apiRef }: { apiRef: React.MutableRefObject<SoundsApi | nu
 }
 
 import { generatePuzzle, checkSolution, completedRegions, isBoardComplete } from "./lib/sudoku";
-import { cageIndexMap, cageLabelCell, cageStatus, generateKiller, type Cage, type CageStatus } from "./lib/killer";
+import { cageIndexMap, cageLabelCell, cageStatus, generateKiller, MAX_CAGE_SIZE, type Cage, type CageStatus } from "./lib/killer";
 import { dailyKey, dailyKillerPuzzle, KILLER_DAILY_GAME_ID } from "./lib/daily";
 import { dailyQueensPuzzle, QUEENS_DAILY_GAME_ID, QUEENS_N } from "./lib/dailyQueens";
 import { hasPostedDaily, markPostedDaily } from "./lib/dailyPost";
 import { generateQueens, queensConflicts, type QueensPuzzle } from "./lib/queens";
-import { randomSeed } from "./lib/random";
+import { hashSeed, randomSeed, seededRandom } from "./lib/random";
 import { QueensBoard } from "./QueensBoard";
 import { Celebration, ParticleLayer, prefersReducedMotion, type ParticleLayerHandle } from "./feel";
 import type { Board, Difficulty, Notes } from "./types";
@@ -58,17 +58,19 @@ function buildGame(
   mode: Mode,
   diff: Difficulty,
 ): { puzzle: Board; solution: number[][]; cages: Cage[] | null; date: string | null; queens: QueensPuzzle | null } {
+  const testSeed = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("seed");
+  const random = testSeed === null ? Math.random : seededRandom(hashSeed(testSeed));
   if (mode === "classic") {
-    const { puzzle, solution } = generatePuzzle(diff);
+    const { puzzle, solution } = generatePuzzle(diff, random);
     return { puzzle, solution, cages: null, date: null, queens: null };
   }
   if (isQueensMode(mode)) {
     const date = mode === "queens-daily" ? dailyKey() : null;
-    const queens = date ? dailyQueensPuzzle(date) : generateQueens(QUEENS_N, randomSeed());
+    const queens = date ? dailyQueensPuzzle(date) : generateQueens(QUEENS_N, testSeed === null ? randomSeed() : hashSeed(testSeed));
     return { puzzle: [], solution: [], cages: null, date, queens };
   }
   const date = mode === "killer-daily" ? dailyKey() : null;
-  const killer = date ? dailyKillerPuzzle(date) : generateKiller();
+  const killer = date ? dailyKillerPuzzle(date) : generateKiller(MAX_CAGE_SIZE, random);
   return {
     puzzle: killer.solution.map((row) => row.map((): null => null)),
     solution: killer.solution,
@@ -110,6 +112,8 @@ export default function App() {
   const [gameWon, setGameWon] = useState(false);
   const [errors, setErrors] = useState(0);
   const [scoreSubmitted, setScoreSubmitted] = useState(false);
+  const [undoStack, setUndoStack] = useState<{ board: Board; notes: Notes; queens: ReadonlySet<string>; errors: number }[]>([]);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [solveBurst, setSolveBurst] = useState<string | null>(null);
   const [shimmering, setShimmering] = useState<ReadonlySet<string>>(() => new Set());
   const [mode, setMode] = useState<Mode>("classic");
@@ -124,7 +128,7 @@ export default function App() {
   const particleRef = useRef<ParticleLayerHandle>(null);
   const boardRef = useRef<HTMLDivElement>(null);
 
-  const { submitScore } = useLeaderboard("sudoku");
+  const { submitScore, topScores, recentScores, loading: leaderboardLoading } = useLeaderboard("sudoku");
   const { submitScore: submitKillerDaily } = useLeaderboard(KILLER_DAILY_GAME_ID);
   const { submitScore: submitQueensDaily } = useLeaderboard(QUEENS_DAILY_GAME_ID);
   const audioRef = useRef<SoundsApi | null>(null);
@@ -146,6 +150,8 @@ export default function App() {
     setGameWon(false);
     setErrors(0);
     setScoreSubmitted(false);
+    setUndoStack([]);
+    setShowLeaderboard(false);
     setDifficulty(diff);
   }, []);
 
@@ -235,6 +241,7 @@ export default function App() {
     (row: number, col: number) => {
       if (gameWon) return;
       const key = `${row}-${col}`;
+      setUndoStack((history) => [...history, { board, notes, queens: queensPlaced, errors }]);
       setQueensPlaced((prev) => {
         const next = new Set(prev);
         if (next.has(key)) next.delete(key);
@@ -242,8 +249,21 @@ export default function App() {
         return next;
       });
     },
-    [gameWon],
+    [gameWon, board, notes, queensPlaced, errors],
   );
+
+  const undo = useCallback(() => {
+    setUndoStack((history) => {
+      const previous = history.at(-1);
+      if (!previous) return history;
+      setBoard(previous.board);
+      setNotes(previous.notes);
+      setQueensPlaced(new Set(previous.queens));
+      setErrors(previous.errors);
+      setGameWon(false);
+      return history.slice(0, -1);
+    });
+  }, []);
 
   const handleCellClick = useCallback((row: number, col: number) => {
     setSelectedCell([row, col]);
@@ -297,6 +317,7 @@ export default function App() {
       if (givens[row]?.[col]) return;
 
       if (notesMode) {
+        setUndoStack((history) => [...history, { board, notes, queens: queensPlaced, errors }]);
         setNotes((prev) => {
           const next = prev.map((r) => r.map((s) => new Set(s)));
           const cellNotes = next[row]![col]!;
@@ -309,6 +330,7 @@ export default function App() {
         });
       } else {
         const wasNum = board[row]?.[col];
+        setUndoStack((history) => [...history, { board, notes, queens: queensPlaced, errors }]);
         const nextBoard = board.map((r) => [...r]);
         nextBoard[row]![col] = num;
         setBoard(nextBoard);
@@ -332,13 +354,15 @@ export default function App() {
         }
       }
     },
-    [selectedCell, gameWon, givens, notesMode, solution, board],
+    [selectedCell, gameWon, givens, notesMode, solution, board, notes, queensPlaced, errors],
   );
 
   const handleErase = useCallback(() => {
     if (!selectedCell || gameWon || board.length === 0) return;
     const [row, col] = selectedCell;
     if (givens[row]?.[col]) return;
+
+    setUndoStack((history) => [...history, { board, notes, queens: queensPlaced, errors }]);
 
     setBoard((prev) => {
       const next = prev.map((r) => [...r]);
@@ -350,7 +374,7 @@ export default function App() {
       next[row]![col] = new Set();
       return next;
     });
-  }, [selectedCell, gameWon, givens, board.length]);
+  }, [selectedCell, gameWon, givens, board, notes, queensPlaced, errors]);
 
   // Keyboard handling
   useEffect(() => {
@@ -457,6 +481,13 @@ export default function App() {
           ]}
           actions={
             <>
+              <button
+                aria-label="Undo move"
+                disabled={undoStack.length === 0}
+                onClick={undo}
+                className="min-h-[2.75rem] px-2 whitespace-nowrap disabled:opacity-40"
+              >Undo</button>
+              <GameThemeToggle />
               {!isQueensMode(mode) && (
                 <button
                   className="min-h-[2.75rem] min-w-[2.75rem] px-2 whitespace-nowrap"
@@ -561,6 +592,19 @@ export default function App() {
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            className="px-3 py-1.5 text-xs font-semibold min-h-[2.75rem]"
+            style={{ borderRadius: "0.75rem", background: "var(--line)", color: "var(--ink)" }}
+            aria-expanded={showLeaderboard}
+            onClick={() => setShowLeaderboard((show) => !show)}
+          >{showLeaderboard ? "Hide leaderboard" : "Leaderboard"}</button>
+          {showLeaderboard && (
+            <section aria-label="Leaderboard" className="w-full max-w-sm rounded-xl" style={{ background: "var(--panel)", border: "1px solid var(--line)" }}>
+              <h2 className="px-4 pt-3 text-sm font-bold">Sudoku leaderboard</h2>
+              <Leaderboard topScores={topScores} recentScores={recentScores} loading={leaderboardLoading} />
+            </section>
+          )}
           {mode === "classic" && (
             <div className="flex gap-1">
               {(["easy", "medium", "hard"] as const).map((d) => (
@@ -621,7 +665,13 @@ export default function App() {
                   row.map((cell, c) => (
                     <button
                       key={`${r}-${c}`}
+                      type="button"
                       onClick={() => handleCellClick(r, c)}
+                      aria-label={`Row ${r + 1}, column ${c + 1}, ${cell === null ? "empty" : `value ${cell}`}${givens[r]?.[c] ? ", given" : ""}`}
+                      data-row={r}
+                      data-col={c}
+                      data-given={givens[r]?.[c] ? "true" : "false"}
+                      data-value={cell ?? ""}
                       className={`flex items-center justify-center relative select-none${shimmering.has(`${r}-${c}`) ? " region-shimmer" : ""}`}
                       style={getCellStyle(r, c)}
                     >
