@@ -10,7 +10,7 @@ function AudioBridge({ apiRef }: { apiRef: React.MutableRefObject<SoundsApi | nu
   return null;
 }
 
-import { generatePuzzle, checkSolution, completedRegions, isBoardComplete } from "./lib/sudoku";
+import { generatePuzzle, checkSolution, completedRegions, isBoardComplete, getHint, autoFillNotes } from "./lib/sudoku";
 import { cageIndexMap, cageLabelCell, cageStatus, generateKiller, MAX_CAGE_SIZE, type Cage, type CageStatus } from "./lib/killer";
 import { dailyKey, dailyKillerPuzzle, KILLER_DAILY_GAME_ID } from "./lib/daily";
 import { dailyQueensPuzzle, QUEENS_DAILY_GAME_ID, QUEENS_N } from "./lib/dailyQueens";
@@ -111,6 +111,7 @@ export default function App() {
   const [timer, setTimer] = useState(0);
   const [gameWon, setGameWon] = useState(false);
   const [errors, setErrors] = useState(0);
+  const [hintsUsed, setHintsUsed] = useState(0);
   const [scoreSubmitted, setScoreSubmitted] = useState(false);
   const [undoStack, setUndoStack] = useState<{ board: Board; notes: Notes; queens: ReadonlySet<string>; errors: number }[]>([]);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
@@ -149,6 +150,7 @@ export default function App() {
     setTimer(0);
     setGameWon(false);
     setErrors(0);
+    setHintsUsed(0);
     setScoreSubmitted(false);
     setUndoStack([]);
     setShowLeaderboard(false);
@@ -223,9 +225,9 @@ export default function App() {
       mode === "killer-daily" ? { game: "killer", submit: submitKillerDaily }
       : mode === "queens-daily" ? { game: "queens", submit: submitQueensDaily }
       : null;
-    if (mode === "classic") {
+    if (mode === "classic" && hintsUsed === 0) {
       submitScore(timer);
-    } else if (daily && dailyDate && !hasPostedDaily(daily.game, dailyDate)) {
+    } else if (hintsUsed === 0 && daily && dailyDate && !hasPostedDaily(daily.game, dailyDate)) {
       // An "Invalid game" reply or a network failure is not shown. Nothing is marked posted,
       // so the next win today can try again.
       daily.submit(timer).then(
@@ -235,7 +237,7 @@ export default function App() {
         () => {},
       );
     }
-  }, [gameWon, scoreSubmitted, timer, submitScore, submitKillerDaily, submitQueensDaily, mode, dailyDate]);
+  }, [gameWon, scoreSubmitted, timer, submitScore, submitKillerDaily, submitQueensDaily, mode, dailyDate, hintsUsed]);
 
   const toggleQueen = useCallback(
     (row: number, col: number) => {
@@ -268,6 +270,25 @@ export default function App() {
   const handleCellClick = useCallback((row: number, col: number) => {
     setSelectedCell([row, col]);
   }, []);
+
+  const handleHint = useCallback(() => {
+    if (!selectedCell || gameWon || board.length === 0) return;
+    const [row, col] = selectedCell;
+    if (givens[row]?.[col] || board[row]?.[col] === solution[row]?.[col]) return;
+    setUndoStack((history) => [...history, { board, notes, queens: queensPlaced, errors }]);
+    const hint = getHint(board, notes, solution, row, col);
+    setBoard(hint.board);
+    setNotes(hint.notes);
+    setHintsUsed((count) => count + 1);
+    popCell(row, col);
+    celebrateRegions(completedRegions(hint.board, solution, row, col));
+  }, [selectedCell, gameWon, board, givens, solution, notes, queensPlaced, errors]);
+
+  const handleAutoFillNotes = useCallback(() => {
+    if (gameWon || board.length === 0) return;
+    setUndoStack((history) => [...history, { board, notes, queens: queensPlaced, errors }]);
+    setNotes(autoFillNotes(board, notes));
+  }, [gameWon, board, notes, queensPlaced, errors]);
 
   const endSolveBurst = useCallback(() => setSolveBurst(null), []);
 
@@ -475,6 +496,7 @@ export default function App() {
           title="Sudoku"
           stats={[
             { label: "Time", value: formatTime(timer) },
+            { label: "Hints", value: hintsUsed },
             isQueensMode(mode)
               ? { label: "Conflicts", value: queenConflicts.size, accent: queenConflicts.size > 0 }
               : { label: "Errors", value: errors, accent: errors > 0 },
@@ -489,14 +511,26 @@ export default function App() {
               >Undo</button>
               <GameThemeToggle />
               {!isQueensMode(mode) && (
-                <button
-                  className="min-h-[2.75rem] min-w-[2.75rem] px-2 whitespace-nowrap"
-                  aria-pressed={notesMode}
-                  onClick={() => setNotesMode((n) => !n)}
-                  style={{ borderRadius: "0.75rem", background: notesMode ? "var(--accent)" : undefined, color: notesMode ? "#fff" : undefined }}
-                >
-                  Notes
-                </button>
+                <>
+                  <button
+                    className="min-h-[2.75rem] px-2 whitespace-nowrap disabled:opacity-40"
+                    disabled={!selectedCell || gameWon || board.length === 0}
+                    onClick={handleHint}
+                  >Hint</button>
+                  <button
+                    className="min-h-[2.75rem] px-2 whitespace-nowrap disabled:opacity-40"
+                    disabled={gameWon || board.length === 0}
+                    onClick={handleAutoFillNotes}
+                  >Auto-fill notes</button>
+                  <button
+                    className="min-h-[2.75rem] min-w-[2.75rem] px-2 whitespace-nowrap"
+                    aria-pressed={notesMode}
+                    onClick={() => setNotesMode((n) => !n)}
+                    style={{ borderRadius: "0.75rem", background: notesMode ? "var(--accent)" : undefined, color: notesMode ? "#fff" : undefined }}
+                  >
+                    Notes
+                  </button>
+                </>
               )}
               <GameAuth />
             </>
