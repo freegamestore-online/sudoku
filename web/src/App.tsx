@@ -14,6 +14,7 @@ import { generatePuzzle, checkSolution, completedRegions, isBoardComplete, getHi
 import { cageIndexMap, cageLabelCell, cageStatus, generateKiller, MAX_CAGE_SIZE, type Cage, type CageStatus } from "./lib/killer";
 import { dailyKey, dailyKillerPuzzle, KILLER_DAILY_GAME_ID } from "./lib/daily";
 import { dailyQueensPuzzle, QUEENS_DAILY_GAME_ID, QUEENS_N } from "./lib/dailyQueens";
+import { dailySudokuPuzzle, dailySudokuResults, recordDailySudokuResult } from "./lib/dailySudoku";
 import { hasPostedDaily, markPostedDaily } from "./lib/dailyPost";
 import { generateQueens, queensConflicts, type QueensPuzzle } from "./lib/queens";
 import { hashSeed, randomSeed, seededRandom } from "./lib/random";
@@ -31,9 +32,10 @@ const SUCCESS_HEX = "#16a34a";
  * Classic is the random game; Killer adds cage sums; Queens places one queen per row, column
  * and region. The daily modes are one puzzle per UTC day, the same for everyone.
  */
-type Mode = "classic" | "killer" | "killer-daily" | "queens" | "queens-daily";
+type Mode = "classic" | "daily" | "killer" | "killer-daily" | "queens" | "queens-daily";
 const MODES: { id: Mode; label: string }[] = [
   { id: "classic", label: "Classic" },
+  { id: "daily", label: "Daily Sudoku" },
   { id: "killer", label: "Killer" },
   { id: "killer-daily", label: "Daily Killer" },
   { id: "queens", label: "Queens" },
@@ -42,6 +44,7 @@ const MODES: { id: Mode; label: string }[] = [
 /** The random game a mode offers from its win screen. */
 const RANDOM_MODE: Record<Mode, Mode> = {
   classic: "classic",
+  daily: "daily",
   killer: "killer",
   "killer-daily": "killer",
   queens: "queens",
@@ -61,6 +64,11 @@ function buildGame(
 ): { puzzle: Board; solution: number[][]; cages: Cage[] | null; date: string | null; queens: QueensPuzzle | null } {
   const testSeed = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("seed");
   const random = testSeed === null ? Math.random : seededRandom(hashSeed(testSeed));
+  if (mode === "daily") {
+    const date = dailyKey();
+    const { puzzle, solution } = dailySudokuPuzzle(date, diff);
+    return { puzzle, solution, cages: null, date, queens: null };
+  }
   if (mode === "classic") {
     const { puzzle, solution } = generatePuzzle(diff, random);
     return { puzzle, solution, cages: null, date: null, queens: null };
@@ -119,6 +127,8 @@ export default function App() {
   const [solveBurst, setSolveBurst] = useState<string | null>(null);
   const [shimmering, setShimmering] = useState<ReadonlySet<string>>(() => new Set());
   const [mode, setMode] = useState<Mode>("classic");
+  const [dailyStatsVersion, setDailyStatsVersion] = useState(0);
+  const [countdown, setCountdown] = useState("");
   // Cage layout for the Killer modes. Null in Classic.
   const [cages, setCages] = useState<Cage[] | null>(null);
   // The UTC day of the current Daily Killer, captured at start so a midnight rollover does not change it.
@@ -162,6 +172,18 @@ export default function App() {
   useEffect(() => {
     startGame("classic", "easy");
   }, [startGame]);
+
+  useEffect(() => {
+    const update = () => {
+      const now = Date.now();
+      const tomorrow = new Date(`${dailyKey(new Date(now + 86_400_000))}T00:00:00Z`).getTime();
+      const left = tomorrow - now;
+      setCountdown(`${Math.floor(left / 3_600_000)}h ${Math.floor((left % 3_600_000) / 60_000)}m ${Math.floor((left % 60_000) / 1000)}s`);
+    };
+    update();
+    const id = window.setInterval(update, 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
   // Cage lookups for the Killer board: which cage each cell is in, and where each sum label goes.
   const cageIndex = useMemo(() => (cages ? cageIndexMap(cages) : null), [cages]);
@@ -222,6 +244,10 @@ export default function App() {
   useEffect(() => {
     if (!gameWon || scoreSubmitted) return;
     setScoreSubmitted(true);
+    if (mode === "daily" && dailyDate) {
+      recordDailySudokuResult({ date: dailyDate, difficulty, time: timer, hints: hintsUsed });
+      setDailyStatsVersion((version) => version + 1);
+    }
     const daily =
       mode === "killer-daily" ? { game: "killer", submit: submitKillerDaily }
       : mode === "queens-daily" ? { game: "queens", submit: submitQueensDaily }
@@ -238,7 +264,7 @@ export default function App() {
         () => {},
       );
     }
-  }, [gameWon, scoreSubmitted, timer, submitScore, submitKillerDaily, submitQueensDaily, mode, dailyDate, hintsUsed]);
+  }, [gameWon, scoreSubmitted, timer, submitScore, submitKillerDaily, submitQueensDaily, mode, dailyDate, hintsUsed, difficulty]);
 
   const toggleQueen = useCallback(
     (row: number, col: number) => {
@@ -640,12 +666,12 @@ export default function App() {
               <Leaderboard topScores={topScores} recentScores={recentScores} loading={leaderboardLoading} />
             </section>
           )}
-          {mode === "classic" && (
+          {(mode === "classic" || mode === "daily") && (
             <div className="flex gap-1">
               {(["easy", "medium", "hard"] as const).map((d) => (
                 <button
                   key={d}
-                  onClick={() => startGame("classic", d)}
+                  onClick={() => startGame(mode, d)}
                   className="px-3 py-1.5 text-xs font-semibold capitalize min-h-[2.75rem]"
                   style={{
                     borderRadius: "0.75rem",
@@ -657,6 +683,18 @@ export default function App() {
                 </button>
               ))}
             </div>
+          )}
+          {mode === "daily" && dailyDate && (
+            <section aria-label="Daily stats" className="w-full max-w-sm rounded-xl p-3 text-center" style={{ background: "var(--panel)", border: "1px solid var(--line)" }}>
+              <p className="text-sm font-semibold">Daily Sudoku for {dailyDate} (UTC)</p>
+              <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>Next daily in {countdown}</p>
+              <div className="mt-2 text-xs" key={dailyStatsVersion}>
+                {(["easy", "medium", "hard"] as const).map((tier) => {
+                  const result = dailySudokuResults().find((item) => item.date === dailyDate && item.difficulty === tier);
+                  return <p key={tier} className="capitalize">{tier}: {result ? `Completed in ${formatTime(result.time)} · ${result.hints} hints` : "Not completed"}</p>;
+                })}
+              </div>
+            </section>
           )}
           {(mode === "killer-daily" || mode === "queens-daily") && dailyDate && (
             <p className="text-xs" style={{ color: "var(--muted)" }}>

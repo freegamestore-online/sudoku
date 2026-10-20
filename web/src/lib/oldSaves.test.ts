@@ -56,9 +56,10 @@ describe("old saves", () => {
     expect(readers).toEqual([]);
   });
 
-  it("only one source file touches storage, and it namespaces every key under sudoku:", () => {
+  it("storage users namespace every key under sudoku:", () => {
     const users = sourceFiles(SRC).filter(([, text]) => /localStorage|sessionStorage/.test(text));
-    expect(users.map(([file]) => file)).toEqual(["lib/dailyPost.ts"]);
+    expect(users.map(([file]) => file).sort()).toEqual(["lib/dailyPost.ts", "lib/dailySudoku.ts"]);
     expect(readFileSync(resolve(SRC, "lib/dailyPost.ts"), "utf-8")).toContain("`sudoku:${game}-daily-posted`");
+    expect(readFileSync(resolve(SRC, "lib/dailySudoku.ts"), "utf-8")).toContain('"sudoku:daily-sudoku-results"');
   });
 });
