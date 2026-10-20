@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { completedRegions, countSolutions, generatePuzzle, generateSolution } from "./sudoku";
-import type { CellValue } from "../types";
+import { autoFillNotes, completedRegions, countSolutions, generatePuzzle, generateSolution, getHint } from "./sudoku";
+import type { CellValue, Notes } from "../types";
 
 function emptyBoard(): CellValue[][] {
   return Array.from({ length: 9 }, () => Array<CellValue>(9).fill(null));
@@ -30,6 +30,47 @@ describe("completedRegions", () => {
     const groups = completedRegions(board, solution, 0, 0);
     expect(groups).toHaveLength(1);
     expect(groups[0]!.every(([, c]) => c === 0)).toBe(true);
+  });
+});
+
+describe("hints and pencil marks", () => {
+  it("reveals the solution value and clears notes at the hinted cell", () => {
+    const { puzzle, solution } = generatePuzzle("easy");
+    const notes: Notes = Array.from({ length: 9 }, () => Array.from({ length: 9 }, () => new Set<number>()));
+    const row = puzzle.findIndex((line) => line.includes(null));
+    const col = puzzle[row]!.findIndex((cell) => cell === null);
+    notes[row]![col]!.add(1);
+    const result = getHint(puzzle, notes, solution, row, col);
+
+    expect(result.value).toBe(solution[row]![col]);
+    expect(result.board[row]![col]).toBe(solution[row]![col]);
+    expect(result.notes[row]![col]!.size).toBe(0);
+    expect(puzzle[row]![col]).toBeNull();
+    expect(notes[row]![col]!.has(1)).toBe(true);
+  });
+
+  it("fills each empty cell with legal row, column and box candidates", () => {
+    const board: CellValue[][] = [
+      [1, 2, 3, 4, 5, 6, 7, 8, null],
+      [4, 5, 6, 7, 8, 9, 1, 2, 3],
+      [7, 8, 9, 1, 2, 3, 4, 5, 6],
+      ...Array.from({ length: 6 }, () => Array<CellValue>(9).fill(null)),
+    ];
+    const notes = autoFillNotes(board);
+    expect([...notes[0]![8]!]).toEqual([9]);
+    expect([...notes[1]![0]!]).toEqual([]);
+    expect([...notes[3]![0]!]).toEqual([2, 3, 5, 6, 8, 9]);
+  });
+
+  it("replaces notes in empty cells and preserves notes on confirmed cells", () => {
+    const board: CellValue[][] = Array.from({ length: 9 }, () => Array<CellValue>(9).fill(null));
+    board[0]![0] = 1;
+    const existing: Notes = Array.from({ length: 9 }, () => Array.from({ length: 9 }, () => new Set<number>()));
+    existing[0]![1]!.add(9);
+    existing[0]![0]!.add(4);
+    const filled = autoFillNotes(board, existing);
+    expect([...filled[0]![1]!]).toEqual([2, 3, 4, 5, 6, 7, 8, 9]);
+    expect([...filled[0]![0]!]).toEqual([4]);
   });
 });
 

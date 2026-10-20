@@ -1,4 +1,29 @@
-import type { CellValue, Difficulty } from "../types";
+import type { Board, CellValue, Difficulty, Notes } from "../types";
+
+/** Reveal the solution value at a cell and clear its pencil marks. */
+export function getHint(
+  board: Board,
+  notes: Notes,
+  solution: number[][],
+  row: number,
+  col: number,
+): { board: Board; notes: Notes; value: number } {
+  const value = solution[row]![col]!;
+  const nextBoard = board.map((line) => [...line]);
+  nextBoard[row]![col] = value;
+  const nextNotes = notes.map((line) => line.map((cellNotes) => new Set(cellNotes)));
+  nextNotes[row]![col] = new Set();
+  return { board: nextBoard, notes: nextNotes, value };
+}
+
+/** Fill pencil marks in every empty cell with digits allowed by its row, column and box. */
+export function autoFillNotes(board: Board, notes?: Notes): Notes {
+  return board.map((line, row) => line.map((cell, col) =>
+    cell === null
+      ? new Set([1, 2, 3, 4, 5, 6, 7, 8, 9].filter((num) => isValidPlacement(board, row, col, num)))
+      : new Set(notes?.[row]?.[col] ?? []),
+  ));
+}
 
 /** Generate a complete valid 9x9 Sudoku grid using backtracking with randomized candidates. */
 export function generateSolution(random: () => number = Math.random): number[][] {
