@@ -17,6 +17,7 @@ import { dailyQueensPuzzle, QUEENS_DAILY_GAME_ID, QUEENS_N } from "./lib/dailyQu
 import { hasPostedDaily, markPostedDaily } from "./lib/dailyPost";
 import { generateQueens, queensConflicts, type QueensPuzzle } from "./lib/queens";
 import { hashSeed, randomSeed, seededRandom } from "./lib/random";
+import { isTextEntryTarget } from "./lib/keyboard";
 import { QueensBoard } from "./QueensBoard";
 import { Celebration, ParticleLayer, prefersReducedMotion, type ParticleLayerHandle } from "./feel";
 import type { Board, Difficulty, Notes } from "./types";
@@ -400,7 +401,7 @@ export default function App() {
   // Keyboard handling
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (gameWon) return;
+      if (gameWon || isTextEntryTarget(e.target)) return;
 
       if (e.key >= "1" && e.key <= "9") {
         e.preventDefault();

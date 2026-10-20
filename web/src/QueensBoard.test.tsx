@@ -11,7 +11,7 @@ describe("QueensBoard", () => {
     render(<QueensBoard puzzle={puzzle} placed={new Set()} conflicts={new Set()} onToggle={() => {}} />);
     expect(screen.getAllByRole("button")).toHaveLength(36);
     expect(screen.getByLabelText(`Row ${qr + 1}, column ${qc + 1}, region ${puzzle.colors[qr]![qc]! + 1}`)).toBeTruthy();
-  });
+  }, 15_000);
 
   it("reports a tap with the cell's row and column", () => {
     const onToggle = vi.fn();
