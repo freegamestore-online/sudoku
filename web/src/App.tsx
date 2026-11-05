@@ -16,6 +16,7 @@ import { dailyKey, dailyKillerPuzzle, KILLER_DAILY_GAME_ID } from "./lib/daily";
 import { dailyQueensPuzzle, QUEENS_DAILY_GAME_ID, QUEENS_N } from "./lib/dailyQueens";
 import { dailySudokuPuzzle, dailySudokuResults, recordDailySudokuResult } from "./lib/dailySudoku";
 import { hasPostedDaily, markPostedDaily } from "./lib/dailyPost";
+import { timeScore } from "./lib/timeScore";
 import { generateQueens, queensConflicts, type QueensPuzzle } from "./lib/queens";
 import { hashSeed, randomSeed, seededRandom } from "./lib/random";
 import { isTextEntryTarget } from "./lib/keyboard";
@@ -239,7 +240,7 @@ export default function App() {
     }
   }, [queensPuzzle, queensPlaced, queenConflicts, gameWon]);
 
-  // Submit score on win. Classic times go to the classic board. A daily time goes to its
+  // Submit score on win, as timeScore(timer) so faster solves rank higher. Classic times go to the classic board. A daily time goes to its
   // game's board, once per device per day. Random Killer and Queens are not posted.
   useEffect(() => {
     if (!gameWon || scoreSubmitted) return;
@@ -253,11 +254,11 @@ export default function App() {
       : mode === "queens-daily" ? { game: "queens", submit: submitQueensDaily }
       : null;
     if (mode === "classic" && hintsUsed === 0) {
-      submitScore(timer);
+      submitScore(timeScore(timer));
     } else if (hintsUsed === 0 && daily && dailyDate && !hasPostedDaily(daily.game, dailyDate)) {
       // An "Invalid game" reply or a network failure is not shown. Nothing is marked posted,
       // so the next win today can try again.
-      daily.submit(timer).then(
+      daily.submit(timeScore(timer)).then(
         (posted) => {
           if (posted.ok) markPostedDaily(daily.game, dailyDate);
         },
